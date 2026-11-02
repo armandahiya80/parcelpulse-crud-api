@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ParcelPulse — Campus Courier & Package Gate Tracker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Top Navigation / Header -->
+  <header class="header-bar">
+    <div class="header-container">
+      <div class="brand-wrapper">
+        <div class="brand-icon">📦</div>
+        <div>
+          <h1 class="brand-title">ParcelPulse</h1>
+          <p class="brand-subtitle">Campus Courier & Package Gate Tracker • Live Inward Desk</p>
+        </div>
+      </div>
+      <div class="header-status-badge">
+        <span class="live-pulse"></span>
+        <span id="system-time">Live Dispatch System</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Area -->
+  <main class="main-content">
+
+    <!-- 1. Top Dispatch Status Bar (Live Counters) -->
+    <section class="stats-grid" aria-label="Dispatch Counters">
+      <div class="stat-card total">
+        <div class="stat-info">
+          <h3>Total Packages Logged</h3>
+          <div class="stat-number" id="count-total">0</div>
+        </div>
+        <div class="stat-icon">📑</div>
+      </div>
+
+      <div class="stat-card waiting">
+        <div class="stat-info">
+          <h3>Waiting at Gate</h3>
+          <div class="stat-number" id="count-waiting">0</div>
+        </div>
+        <div class="stat-icon">⏳</div>
+      </div>
+
+      <div class="stat-card collected">
+        <div class="stat-info">
+          <h3>Collected by Students</h3>
+          <div class="stat-number" id="count-collected">0</div>
+        </div>
+        <div class="stat-icon">✅</div>
+      </div>
+    </section>
+
+    <!-- 2. Log Incoming Package Form Bar (POST /api/parcels) -->
+    <section class="form-panel">
+      <div class="panel-header">
+        <h2 class="panel-title"><span>📥</span> Log Newly Arrived Package</h2>
+      </div>
+
+      <form id="parcel-form" class="parcel-form" onsubmit="handleCreateParcel(event)">
+        <div class="form-group">
+          <label for="studentName">Student Name *</label>
+          <input 
+            type="text" 
+            id="studentName" 
+            name="studentName" 
+            placeholder="e.g., Aarav Verma" 
+            required 
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="roomOrHostel">Hostel & Room *</label>
+          <input 
+            type="text" 
+            id="roomOrHostel" 
+            name="roomOrHostel" 
+            placeholder="e.g., Block B - 304" 
+            required 
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="courierService">Courier Service *</label>
+          <select id="courierService" name="courierService" required>
+            <option value="" disabled selected>Select Courier</option>
+            <option value="Amazon">Amazon</option>
+            <option value="Flipkart">Flipkart</option>
+            <option value="BlueDart">BlueDart</option>
+            <option value="Delhivery">Delhivery</option>
+            <option value="Myntra">Myntra</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="shelfCode">Shelf / Rack Code *</label>
+          <input 
+            type="text" 
+            id="shelfCode" 
+            name="shelfCode" 
+            placeholder="e.g., Rack-A2 / Gate-Box-5" 
+            required 
+            autocomplete="off"
+          />
+        </div>
+
+        <button type="submit" class="btn-primary" id="btn-submit">
+          <span>+ Log Inward</span>
+        </button>
+      </form>
+    </section>
+
+    <!-- 3. Filter & Search Toolbar -->
+    <section class="toolbar-section">
+      <div class="search-box">
+        <input 
+          type="text" 
+          id="search-input" 
+          placeholder="Filter by student name, room, or shelf..." 
+          oninput="filterParcels()"
+        />
+      </div>
+      <div class="filter-pills">
+        <button class="filter-btn active" onclick="setFilter('all', this)">All Packages</button>
+        <button class="filter-btn" onclick="setFilter('At Gate', this)">At Gate</button>
+        <button class="filter-btn" onclick="setFilter('Collected', this)">Collected</button>
+      </div>
+    </section>
+
+    <!-- 4. Shipping Label Cards Grid (GET /api/parcels) -->
+    <section class="cards-grid" id="parcels-grid">
+      <!-- Populated dynamically via fetch GET -->
+      <div class="empty-state">
+        <div class="empty-icon">⏳</div>
+        <h3 class="empty-title">Loading packages from gate database...</h3>
+        <p class="empty-desc">Fetching current inward records.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Notification Toast Container -->
+  <div id="toast-container"></div>
+
+  <!-- Footer -->
+  <footer class="footer-bar">
+    <p>ParcelPulse © Campus Courier Management System • Built with Express.js & MongoDB Atlas</p>
+  </footer>
+
+  <!-- Minimal Vanilla JavaScript Fetch Client -->
+  <script>
+    // Global in-memory cache of fetched parcels
+    let allParcels = [];
+    let currentFilter = 'all';
+
+    // Base API URL
+    const API_URL = '/api/parcels';
+
+    // Show live clock in header
+    function updateClock() {
+      const now = new Date();
+      const el = document.getElementById('system-time');
+      if (el) {
+        el.textContent = now.toLocaleDateString(undefined, { 
+          weekday: 'short', month: 'short', day: 'numeric' 
+        }) + ' • ' + now.toLocaleTimeString();
+      }
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // Toast Notification helper
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      toast.innerHTML = `<span>${type === 'success' ? '✓' : type === 'error' ? '⚠' : 'ℹ'}</span> ${message}`;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.remove();
+      }, 3500);
+    }
+
+    // 1. READ ALL: Fetch parcels from server (GET /api/parcels)
+    async function loadParcels() {
+      try {
+        const response = await fetch(API_URL);
+        if (!response.ok) throw new Error('HTTP ' + response.status + ': Failed to fetch');
+        allParcels = await response.json();
+        updateCounters();
+        filterParcels();
+      } catch (err) {
+        console.error('Error fetching parcels:', err);
+        const grid = document.getElementById('parcels-grid');
+        grid.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">⚠️</div>
+            <h3 class="empty-title">Unable to connect to database</h3>
+            <p class="empty-desc">${err.message}. Please check MongoDB Atlas connection & IP Access List.</p>
+          </div>
+        `;
+      }
+    }
+
+    // Update Top Counters
+    function updateCounters() {
+      const total = allParcels.length;
+      const waiting = allParcels.filter(p => p.pickupStatus === 'At Gate').length;
+      const collected = allParcels.filter(p => p.pickupStatus === 'Collected').length;
+
+      document.getElementById('count-total').textContent = total;
+      document.getElementById('count-waiting').textContent = waiting;
+      document.getElementById('count-collected').textContent = collected;
+    }
+
+    // Filter parcels by search query and active tab
+    function filterParcels() {
+      const query = (document.getElementById('search-input').value || '').toLowerCase().trim();
+      
+      const filtered = allParcels.filter(parcel => {
+        const matchesStatus = currentFilter === 'all' || parcel.pickupStatus === currentFilter;
+        const matchesQuery = 
+          parcel.studentName.toLowerCase().includes(query) ||
+          parcel.roomOrHostel.toLowerCase().includes(query) ||
+          parcel.shelfCode.toLowerCase().includes(query) ||
+          parcel.courierService.toLowerCase().includes(query);
+        return matchesStatus && matchesQuery;
+      });
+
+      renderCards(filtered);
+    }
+
+    function setFilter(status, buttonElement) {
+      currentFilter = status;
+      document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+      if (buttonElement) buttonElement.classList.add('active');
+      filterParcels();
+    }
+
+    // Render Shipping Label Cards
+    function renderCards(parcels) {
+      const grid = document.getElementById('parcels-grid');
+
+      if (!parcels || parcels.length === 0) {
+        grid.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">📭</div>
+            <h3 class="empty-title">No Packages Found</h3>
+            <p class="empty-desc">No parcels match the current filter or gate inventory is clear.</p>
+          </div>
+        `;
+        return;
+      }
+
+      grid.innerHTML = parcels.map(parcel => {
+        const isAtGate = parcel.pickupStatus === 'At Gate';
+        const formattedDate = parcel.createdAt ? new Date(parcel.createdAt).toLocaleString(undefined, {
+          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+        }) : 'Recently';
+
+        const courierClass = `courier-${parcel.courierService.toLowerCase()}`;
+        const statusClass = isAtGate ? 'status-at-gate' : 'status-collected';
+
+        return `
+          <article class="shipping-card" data-courier="${escapeHtml(parcel.courierService)}">
+            <div class="card-top">
+              <div class="card-header-row">
+                <span class="courier-badge ${courierClass}">
+                  ${escapeHtml(parcel.courierService)}
+                </span>
+                <span class="status-badge ${statusClass}">
+                  <span>●</span> ${escapeHtml(parcel.pickupStatus)}
+                </span>
+              </div>
+
+              <h3 class="recipient-title">
+                <span>👤</span> ${escapeHtml(parcel.studentName)}
+              </h3>
+              <div class="recipient-hostel">
+                <span>📍</span> ${escapeHtml(parcel.roomOrHostel)}
+              </div>
+            </div>
+
+            <hr class="card-divider" />
+
+            <div class="card-meta">
+              <div class="meta-box">
+                <span class="meta-label">Shelf Location</span>
+                <div class="meta-value">
+                  <span>${escapeHtml(parcel.shelfCode)}</span>
+                  <button 
+                    class="edit-shelf-btn" 
+                    title="Change Shelf Code"
+                    onclick="handleUpdateShelf('${parcel._id}', '${escapeHtml(parcel.shelfCode)}')"
+                  >✎</button>
+                </div>
+              </div>
+              <div class="meta-box">
+                <span class="meta-label">Logged At</span>
+                <div class="meta-value" style="font-size: 0.8rem; font-weight: 500;">
+                  ${formattedDate}
+                </div>
+              </div>
+            </div>
+
+            <div class="card-actions">
+              <button 
+                class="btn-action ${isAtGate ? 'btn-collect' : 'btn-undo'}"
+                onclick="handleToggleStatus('${parcel._id}', '${isAtGate ? 'Collected' : 'At Gate'}')"
+              >
+                ${isAtGate ? '✓ Mark Collected' : '↺ Mark At Gate'}
+              </button>
+              
+              <button 
+                class="btn-action btn-delete" 
+                title="Delete Parcel Log"
+                onclick="handleDeleteParcel('${parcel._id}', '${escapeHtml(parcel.studentName)}')"
+              >
+                🗑 Delete
+              </button>
+            </div>
+          </article>
+        `;
+      }).join('');
+    }
+
+    // 2. CREATE: Submit new parcel form (POST /api/parcels)
+    async function handleCreateParcel(event) {
+      event.preventDefault();
+      const form = event.target;
+      const submitBtn = document.getElementById('btn-submit');
+
+      const payload = {
+        studentName: form.studentName.value.trim(),
+        roomOrHostel: form.roomOrHostel.value.trim(),
+        courierService: form.courierService.value,
+        shelfCode: form.shelfCode.value.trim(),
+        pickupStatus: 'At Gate'
+      };
+
+      try {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Logging...';
+
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.details || data.error || 'Failed to create parcel');
+        }
+
+        showToast(`Logged package for ${data.studentName} at ${data.shelfCode}!`, 'success');
+        form.reset();
+        await loadParcels();
+      } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<span>+ Log Inward</span>';
+      }
+    }
+
+    // 3. UPDATE: Toggle pickupStatus (PUT /api/parcels/:id)
+    async function handleToggleStatus(id, newStatus) {
+      try {
+        const response = await fetch(`${API_URL}/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pickupStatus: newStatus })
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.details || data.error || 'Failed to update status');
+        }
+
+        showToast(`Status updated to "${newStatus}" for ${data.studentName}`, 'success');
+        await loadParcels();
+      } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+      }
+    }
+
+    // 4. UPDATE: Change shelf code (PUT /api/parcels/:id)
+    async function handleUpdateShelf(id, currentShelf) {
+      const newShelf = prompt('Enter new Shelf/Rack Code:', currentShelf);
+      if (!newShelf || newShelf.trim() === '' || newShelf.trim() === currentShelf) return;
+
+      try {
+        const response = await fetch(`${API_URL}/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ shelfCode: newShelf.trim() })
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.details || data.error || 'Failed to update shelf');
+        }
+
+        showToast(`Moved package to ${data.shelfCode}!`, 'success');
+        await loadParcels();
+      } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+      }
+    }
+
+    // 5. DELETE: Remove parcel log (DELETE /api/parcels/:id)
+    async function handleDeleteParcel(id, studentName) {
+      const confirmDelete = confirm(`Are you sure you want to delete the package log for ${studentName}?`);
+      if (!confirmDelete) return;
+
+      try {
+        const response = await fetch(`${API_URL}/${id}`, {
+          method: 'DELETE'
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.details || data.error || 'Failed to delete parcel');
+        }
+
+        showToast(`Package record deleted successfully!`, 'success');
+        await loadParcels();
+      } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+      }
+    }
+
+    // Utility: XSS prevention
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // Initial load
+    loadParcels();
+  </script>
+</body>
+</html>
